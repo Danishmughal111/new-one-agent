@@ -1,0 +1,1 @@
+"""Security agents: permission validation and sensitive-operation checks."""

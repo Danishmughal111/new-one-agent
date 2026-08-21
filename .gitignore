@@ -1,0 +1,75 @@
+# =============================
+# Environment / Secrets
+# =============================
+.env
+.env.*
+!.env.example
+
+# =============================
+# Python
+# =============================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing / coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+
+# =============================
+# IDEs / Editors
+# =============================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# =============================
+# Database / Runtime
+# =============================
+*.db
+*.sqlite
+*.sqlite3
+postgres_data/
+redis_data/
+
+# =============================
+# Logs
+# =============================
+*.log
+logs/

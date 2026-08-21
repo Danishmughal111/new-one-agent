@@ -1,0 +1,31 @@
+# =====================================================================
+# AI COMPANY OS — Phase 1 Dependencies
+#
+# Note: exact upper pins were intentionally NOT used because the local
+# interpreter is Python 3.14, which requires newer wheels for compiled
+# packages (asyncpg, pydantic-core, greenlet). Lower bounds let pip pick
+# the latest compatible release. Pin exact versions later once reproducible
+# builds are needed in CI/containers.
+# =====================================================================
+
+# Web framework & server
+fastapi>=0.115
+uvicorn[standard]>=0.34
+
+# Database
+sqlalchemy>=2.0.36
+asyncpg>=0.30
+aiosqlite>=0.20
+alembic>=1.14
+
+# Settings & validation
+pydantic>=2.10
+pydantic-settings>=2.7
+
+# Future background infrastructure (not required by Phase 1 execution path)
+redis>=5.2
+
+# Testing
+pytest>=8.3
+pytest-asyncio>=0.25
+httpx>=0.28
