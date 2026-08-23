@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
 
+    # Google OAuth 2.0 (Blogger API v3)
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_redirect_uri: str = "http://localhost:8000/trendera/blogger/oauth/callback"
+    google_blog_id: str = ""
+    google_refresh_token: str = ""
+
     # Logging
     log_level: str = "INFO"
     log_format: str = "text"  # "text" or "json"
