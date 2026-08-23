@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     # Redis (future infrastructure; not used by Phase 1 execution)
     redis_url: str = "redis://localhost:6379/0"
 
+    # LLM (DeepSeek-ready; leave empty to use the deterministic mock)
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
+
     # Logging
     log_level: str = "INFO"
     log_format: str = "text"  # "text" or "json"

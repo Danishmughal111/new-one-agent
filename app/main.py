@@ -11,10 +11,10 @@ from fastapi import FastAPI
 
 from app.agents.factory import ensure_company_agents
 from app.agents.registry import AgentRegistry
-from app.api import agents, audit_logs, departments, health, objectives, tasks, workflows
+from app.api import agents, audit_logs, departments, health, objectives, tasks, trendera, workflows
 from app.api.errors import register_exception_handlers
 from app.core.config import settings
-from app.core.database import async_session_factory, create_all
+from app.core.database import async_session_factory
 from app.core.logging import configure_logging
 
 
@@ -22,9 +22,9 @@ from app.core.logging import configure_logging
 async def lifespan(app: FastAPI):
     configure_logging()
 
-    # Development/test convenience: create tables before bootstrapping.
-    # Production will use Alembic migrations instead.
-    await create_all()
+    # NOTE: schema creation is NOT performed here. Production schemas are
+    # managed by Alembic (``alembic upgrade head``). Tests create their own
+    # isolated SQLite schema explicitly via fixtures.
 
     # Idempotent agent bootstrap: ensures persisted agent records then builds
     # a single in-memory registry shared by all requests.
@@ -57,6 +57,7 @@ def create_app() -> FastAPI:
     app.include_router(objectives.router, prefix=settings.api_prefix)
     app.include_router(workflows.router, prefix=settings.api_prefix)
     app.include_router(audit_logs.router, prefix=settings.api_prefix)
+    app.include_router(trendera.router, prefix=settings.api_prefix)
 
     return app
 

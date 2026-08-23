@@ -6,9 +6,11 @@ which is required before ``create_all`` or Alembic autogenerate can see them.
 
 from app.models.base import Base, TimestampMixin, new_uuid, utcnow
 from app.models.agent import Agent
+from app.models.article import Article
 from app.models.audit_log import AuditLog
 from app.models.department import Department
 from app.models.objective import Objective
+from app.models.product import Product
 from app.models.task import Task
 from app.models.task_status_history import TaskStatusHistory
 from app.models.workflow import Workflow
@@ -19,9 +21,11 @@ __all__ = [
     "new_uuid",
     "utcnow",
     "Agent",
+    "Article",
     "AuditLog",
     "Department",
     "Objective",
+    "Product",
     "Task",
     "TaskStatusHistory",
     "Workflow",
