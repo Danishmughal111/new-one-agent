@@ -6,7 +6,7 @@ environment (or a `.env` file), never hardcoded.
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -77,6 +77,22 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     log_format: str = "text"  # "text" or "json"
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _normalize_database_url(cls, value):
+        """Force PostgreSQL URLs onto the asyncpg driver (async SQLAlchemy).
+
+        Render/Neon supply ``postgres://`` or ``postgresql://`` URLs, but the
+        async engine needs ``postgresql+asyncpg://``. SQLite URLs pass through.
+        """
+        if isinstance(value, str):
+            url = value.strip()
+            if url.startswith("postgres://"):
+                return "postgresql+asyncpg://" + url[len("postgres://"):]
+            if url.startswith("postgresql://"):
+                return "postgresql+asyncpg://" + url[len("postgresql://"):]
+        return value
 
 
 @lru_cache
