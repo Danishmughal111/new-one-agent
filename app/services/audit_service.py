@@ -5,6 +5,8 @@ assignment, approval, rejection, agent execution, permission denial, etc.).
 Trivial reads are intentionally NOT audited.
 """
 
+from __future__ import annotations
+
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
