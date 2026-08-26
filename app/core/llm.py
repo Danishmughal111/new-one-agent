@@ -18,8 +18,12 @@ logger = get_logger("core.llm")
 def _build_prompt(product_name: str, extra: list[str] | None = None) -> str:
     """Build the single focused generation prompt for a product."""
     lines = [
-        f"Write a detailed TrendEra affiliate article about the product: {product_name}.",
-        "Include an engaging introduction, key features, benefits, and a conclusion.",
+        f"Write a detailed, useful TrendEra affiliate article about: {product_name}.",
+        "Use the research context as your ONLY source of facts. Do NOT invent specifications, prices, or claims.",
+        "Write in a direct, human, commercial voice. Avoid filler like \"in today's fast-paced world\" or \"in the ever-evolving landscape\".",
+        "Structure the article with these markdown sections (use ## headings):",
+        "Introduction, Why this product matters, Key features, Real-world use cases, Pros, Cons / limitations, Who should buy it, Alternatives, FAQ, Final verdict.",
+        "Use the provided keywords naturally; do not keyword-stuff.",
     ]
     if extra:
         lines.extend(extra)
@@ -27,20 +31,27 @@ def _build_prompt(product_name: str, extra: list[str] | None = None) -> str:
 
 
 def _mock_completion(product_name: str) -> str:
-    """Deterministic placeholder article that intentionally names the product."""
+    """Deterministic placeholder article with the full required section structure."""
     return (
         f"# {product_name} Review\n\n"
-        f"{product_name} is a standout product that deserves attention. "
-        "In this TrendEra article we take a close look at what makes it a "
-        "worthwhile option for shoppers in the region.\n\n"
-        "The product delivers solid build quality, practical features, and "
-        "excellent value for money. Users can expect dependable everyday "
-        "performance and a smooth experience from the moment they unbox it.\n\n"
-        "Key benefits include ease of use, durability, and strong overall "
-        "utility. Whether you are a first-time buyer or upgrading, "
-        f"{product_name} offers a compelling mix of quality and affordability.\n\n"
-        "Final verdict: if you are looking for a reliable and well-rounded "
-        f"choice, {product_name} is easy to recommend."
+        f"{product_name} is a capable option in its category, and this review "
+        "breaks down what it offers, who it suits, and whether it is worth buying.\n\n"
+        f"## Why this product matters\n\n"
+        f"{product_name} addresses a common need with a practical, well-rounded feature set.\n\n"
+        f"## Key features\n\n"
+        "- Practical everyday functionality\n- Durable, dependable build\n- Easy to use out of the box\n\n"
+        f"## Real-world use cases\n\n"
+        f"{product_name} fits daily routines, first-time buyers, and anyone upgrading from an older option.\n\n"
+        "## Pros\n\n- Solid build quality\n- Good value for money\n- Straightforward to use\n\n"
+        "## Cons / limitations\n\n- May lack advanced extras\n- Premium positioning for some buyers\n\n"
+        "## Who should buy it\n\n"
+        f"People who want a dependable, no-fuss {product_name.lower()} for everyday use.\n\n"
+        "## Alternatives\n\n"
+        "Other options in the same category offer different trade-offs, so compare before buying.\n\n"
+        "## FAQ\n\n"
+        f"**Is the {product_name} worth buying?** Yes, for most buyers looking for a reliable choice.\n\n"
+        "## Final verdict\n\n"
+        f"If you want a well-rounded, reliable option, {product_name} is easy to recommend."
     )
 
 

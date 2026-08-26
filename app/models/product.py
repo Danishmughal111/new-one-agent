@@ -21,6 +21,7 @@ class Product(Base, TimestampMixin):
     )
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     region: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    affiliate_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, nullable=False, default=dict)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid

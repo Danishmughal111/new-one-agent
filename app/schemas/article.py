@@ -1,5 +1,6 @@
 """TrendEra article schemas."""
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import Field
@@ -15,6 +16,22 @@ class ArticleResponse(BaseResponse):
     content: str
     status: str
     labels: list[str] | None = None
+    blogger_post_id: str | None = None
+    blogger_url: str | None = None
+    published_at: datetime | None = None
+
+
+class ArticleListResponse(BaseResponse):
+    """Article list item (includes associated product name)."""
+
+    product_id: str
+    product_name: str | None = None
+    title: str
+    status: str
+    labels: list[str] | None = None
+    blogger_post_id: str | None = None
+    blogger_url: str | None = None
+    published_at: datetime | None = None
 
 
 class BloggerDraftPayload(ORMModel):

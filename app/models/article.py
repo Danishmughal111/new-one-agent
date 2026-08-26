@@ -1,6 +1,8 @@
 """TrendEra article model."""
 
-from sqlalchemy import JSON, ForeignKey, String, Text
+from datetime import datetime
+
+from sqlalchemy import JSON, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, new_uuid
@@ -19,6 +21,10 @@ class Article(Base, TimestampMixin):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="DRAFT")
     labels: Mapped[list | None] = mapped_column("labels", JSON, nullable=True)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSON, nullable=False, default=dict)
+    blogger_post_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    blogger_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<Article id={self.id} product_id={self.product_id} status={self.status}>"

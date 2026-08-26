@@ -31,13 +31,21 @@ class Settings(BaseSettings):
     api_prefix: str = ""
     host: str = "0.0.0.0"
     port: int = 8000
+    frontend_url: str = "http://localhost:5173"
+
+    # TrendEra autonomous workflow
+    min_opportunity_score: int = 0  # 0 = never block weak opportunities
+    product_republish_cooldown_days: int = 30
 
     # Security
     secret_key: str = Field(default="dev-insecure-secret-key-change-me")
 
-    # Database
+    # Database.
+    # Local development defaults to a file-backed SQLite database so the app
+    # runs without PostgreSQL. Set DATABASE_URL to a PostgreSQL asyncpg URL
+    # for Render/production; this is always environment-configurable.
     database_url: str = Field(
-        default="postgresql+asyncpg://ai_company:ai_company_password@localhost:5432/ai_company_os"
+        default="sqlite+aiosqlite:///./dev.db"
     )
 
     # Redis (future infrastructure; not used by Phase 1 execution)
@@ -48,10 +56,19 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
 
+    # Affiliate offer discovery (all optional; the app runs without them).
+    # When unconfigured, automatic affiliate discovery gracefully returns
+    # "not_found" and the article is still generated/published without a CTA.
+    affiliate_provider: str = ""  # e.g. "product_search"
+    affiliate_api_key: str = ""
+    affiliate_partner_id: str = ""
+    affiliate_api_base_url: str = ""
+    min_affiliate_match_score: int = 70
+
     # Google OAuth 2.0 (Blogger API v3)
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
-    google_oauth_redirect_uri: str = "http://localhost:8000/trendera/blogger/oauth/callback"
+    google_oauth_redirect_uri: str = "http://localhost:8000/auth/blogger/callback"
     google_blog_id: str = ""
     google_refresh_token: str = ""
 

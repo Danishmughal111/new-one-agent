@@ -41,7 +41,7 @@ Completed / Revision Required / Escalated
 
 ## Tech Stack
 
-- Python 3.12+
+- Python 3.12+ (Docker image uses 3.12; local dev may use 3.14)
 - FastAPI
 - PostgreSQL (production) / SQLite (tests only)
 - SQLAlchemy 2.0 (async)
@@ -106,27 +106,43 @@ cp .env.example .env
 
 > `.env` is git-ignored and must never be committed.
 
-### 5. Run the application (with Docker)
+### 5. Database migrations (Alembic)
+
+The application does **not** create its schema automatically. Apply migrations
+explicitly:
+
+```bash
+alembic upgrade head
+```
+
+### 6. Run the application (with Docker)
 
 ```bash
 docker compose up --build
 ```
 
-This starts the FastAPI app, PostgreSQL, and Redis (reserved for future use).
+This starts the FastAPI app, PostgreSQL (with migrations applied on startup),
+and Redis (reserved for future use).
 
-### 6. Run without Docker (local Postgres required)
+### 7. Run without Docker (local Postgres required)
 
 ```bash
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-### 7. Run tests
+### 8. Run tests
 
 ```bash
 pytest
 ```
 
-Tests use an in-memory SQLite database and require **no** external services or API keys.
+Tests use an isolated SQLite database and require **no** external services or API keys.
+
+## Supported Python Version
+
+- **Docker/production:** Python 3.12 (broad dependency wheel support)
+- **Local development:** Python 3.14 is usable if the full test suite passes; dependency pins are lower bounds so pip resolves compatible wheels.
 
 ## Configuration
 

@@ -5,14 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import NotFoundError, ValidationError
-from app.core.oauth import (
-    build_authorization_url as _build_authorization_url,
-    exchange_code_for_token,
-    fetch_access_token,
-)
+from app.core.oauth import build_authorization_url as _build_authorization_url
 from app.models.article import Article
+from app.models.base import utcnow
 from app.repositories.article import ArticleRepository
 from app.schemas.article import BloggerDraftPayload
+from app.services.blogger_connection_service import BloggerConnectionService
+from app.services.html_converter import markdown_to_blogger_html
 from app.services.qa_service import validate_article
 
 BLOGGER_API = "https://www.googleapis.com/blogger/v3"
@@ -24,6 +23,7 @@ class BloggerService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self._articles = ArticleRepository(session)
+        self._connections = BloggerConnectionService(session)
 
     # ------------------------------------------------------------------
     # OAuth helpers
@@ -32,9 +32,9 @@ class BloggerService:
         """Return the Google OAuth consent URL to start authorization."""
         return _build_authorization_url()
 
-    async def handle_callback(self, code: str) -> None:
-        """Exchange an authorization code for credentials (refreshed on use)."""
-        await exchange_code_for_token(code)
+    async def handle_callback(self, code: str) -> dict:
+        """Exchange an authorization code and persist the connection."""
+        return await self._connections.connect(code)
 
     # ------------------------------------------------------------------
     # Publishing
@@ -44,7 +44,7 @@ class BloggerService:
         article = await self._get_article(article_id)
         return BloggerDraftPayload(
             title=article.title,
-            content=article.content,
+            content=markdown_to_blogger_html(article.content),
             labels=article.labels or [],
         )
 
@@ -75,12 +75,12 @@ class BloggerService:
                 f"Article failed QA: {', '.join(qa.errors)}"
             )
 
-        access_token = await fetch_access_token(transport=transport)
+        access_token = await self._connections.get_access_token(transport=transport)
         body = {
             "kind": "blogger#post",
             "blog": {"id": settings.google_blog_id},
             "title": article.title,
-            "content": article.content,
+            "content": markdown_to_blogger_html(article.content),
             "labels": article.labels or [],
         }
         # DRAFT is the default; set LIVE only when publish_now is requested.
@@ -98,6 +98,14 @@ class BloggerService:
             response = await client.post(url, json=body, headers=headers)
             response.raise_for_status()
             created = response.json()
+
+        # Persist the Blogger post identity and status on the article.
+        article.blogger_post_id = created.get("id")
+        article.blogger_url = created.get("url")
+        article.status = "PUBLISHED" if publish_now else "DRAFT"
+        if publish_now:
+            article.published_at = utcnow()
+        await self.session.commit()
 
         return {
             "id": created["id"],
@@ -122,12 +130,16 @@ class BloggerService:
 
 
 def _product_name_for(article: Article) -> str:
-    """Derive the product name to check QA against from the article title.
+    """Derive the product name to check QA against.
 
-    Titles are generated as ``{product.name} Review``; we fall back to the
-    article title itself when the conventional suffix is absent so QA's
-    "product name present" check remains deterministic.
+    Prefer the explicit ``product_name`` stored in article metadata (set by the
+    workflow), then fall back to the legacy ``{product.name} Review`` title
+    convention so QA remains deterministic for manually created articles.
     """
+    metadata = article.metadata_ or {}
+    if metadata.get("product_name"):
+        return metadata["product_name"]
+
     title = article.title or ""
     if title.endswith(" Review"):
         return title[: -len(" Review")].strip()

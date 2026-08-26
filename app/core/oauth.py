@@ -18,26 +18,8 @@ from app.core.exceptions import ValidationError
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 SCOPE = "https://www.googleapis.com/auth/blogger"
-
-# In-memory token store. The refresh token may also be bootstrapped from
-# ``GOOGLE_REFRESH_TOKEN`` so a single owner can reuse credentials without
-# re-running the OAuth consent flow after the first time.
-_refresh_token: str | None = None
-
-
-def _get_refresh_token() -> str:
-    token = _refresh_token or settings.google_refresh_token.strip() or None
-    if not token:
-        raise ValidationError(
-            "No Google refresh token available; run blogger authorization first"
-        )
-    return token
-
-
-def store_refresh_token(token: str) -> None:
-    """Persist a refresh token in memory for reuse during this process."""
-    global _refresh_token
-    _refresh_token = token
+USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
+BLOGGER_API = "https://www.googleapis.com/blogger/v3"
 
 
 def build_authorization_url(state: str = "trendera") -> str:
@@ -67,25 +49,58 @@ async def exchange_code_for_token(code: str, transport: httpx.AsyncBaseTransport
         "redirect_uri": settings.google_oauth_redirect_uri,
         "grant_type": "authorization_code",
     }
-    data = await _post_form(TOKEN_URL, payload, transport=transport)
-
-    refresh = data.get("refresh_token")
-    if refresh:
-        store_refresh_token(refresh)
-
-    return data
+    return await _post_form(TOKEN_URL, payload, transport=transport)
 
 
-async def fetch_access_token(transport: httpx.AsyncBaseTransport | None = None) -> str:
-    """Return a fresh access token using the stored refresh token."""
+async def fetch_access_token(
+    refresh_token: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> str:
+    """Return a fresh access token using the provided refresh token."""
     payload = {
         "client_id": settings.google_oauth_client_id,
         "client_secret": settings.google_oauth_client_secret,
-        "refresh_token": _get_refresh_token(),
+        "refresh_token": refresh_token,
         "grant_type": "refresh_token",
     }
     data = await _post_form(TOKEN_URL, payload, transport=transport)
     return data["access_token"]
+
+
+async def fetch_user_email(
+    access_token: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> str | None:
+    """Best-effort fetch of the authorized account's email address."""
+    try:
+        async with httpx.AsyncClient(transport=transport, timeout=30) as client:
+            response = await client.get(
+                USERINFO_URL, headers={"Authorization": f"Bearer {access_token}"}
+            )
+            response.raise_for_status()
+            return response.json().get("email")
+    except Exception:  # noqa: BLE001 - optional enrichment, never fatal
+        return None
+
+
+async def fetch_blog_name(
+    access_token: str,
+    blog_id: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> str | None:
+    """Best-effort fetch of the Blogger blog name."""
+    if not blog_id:
+        return None
+    try:
+        async with httpx.AsyncClient(transport=transport, timeout=30) as client:
+            response = await client.get(
+                f"{BLOGGER_API}/blogs/{blog_id}",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            response.raise_for_status()
+            return response.json().get("name")
+    except Exception:  # noqa: BLE001 - optional enrichment, never fatal
+        return None
 
 
 async def _post_form(

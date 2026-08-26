@@ -15,6 +15,7 @@ class ProductCreate(ORMModel):
     price_currency: str = "SAR"
     image_url: str | None = None
     region: str | None = Field(default=None, max_length=16)
+    affiliate_url: str | None = None
     metadata: dict = Field(default_factory=dict)
 
 
@@ -28,4 +29,5 @@ class ProductResponse(BaseResponse):
     price_currency: str
     image_url: str | None = None
     region: str | None = None
+    affiliate_url: str | None = None
     metadata: dict = Field(validation_alias="metadata_")

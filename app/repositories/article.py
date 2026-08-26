@@ -20,3 +20,16 @@ class ArticleRepository(BaseRepository[Article]):
         stmt = select(Article).where(Article.product_id == product_id)
         result = await self.session.scalars(stmt)
         return list(result.all())
+
+    async def list_with_product(self, limit: int = 100) -> list[tuple[Article, str | None]]:
+        """List recent articles together with their product name (newest first)."""
+        from app.models.product import Product
+
+        stmt = (
+            select(Article, Product.name)
+            .join(Product, Article.product_id == Product.id)
+            .order_by(Article.created_at.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return [(article, product_name) for article, product_name in result.all()]

@@ -51,5 +51,6 @@ async def test_blogger_draft_preparation(session) -> None:
     draft = await BloggerService(session).prepare_draft(article.id)
 
     assert draft.title == article.title
-    assert draft.content == article.content
+    assert draft.content.startswith("<h2>Tablet Review</h2>")
+    assert "<p>" in draft.content
     assert draft.to_dict()["labels"] == ["Electronics"]

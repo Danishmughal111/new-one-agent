@@ -25,6 +25,7 @@ class ProductService:
             price_currency=data.price_currency,
             image_url=data.image_url,
             region=data.region,
+            affiliate_url=data.affiliate_url,
             metadata_=data.metadata,
         )
         product = await self._repo.add(product)
