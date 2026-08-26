@@ -59,10 +59,12 @@ class Settings(BaseSettings):
     # Affiliate offer discovery (all optional; the app runs without them).
     # When unconfigured, automatic affiliate discovery gracefully returns
     # "not_found" and the article is still generated/published without a CTA.
-    affiliate_provider: str = ""  # e.g. "product_search"
-    affiliate_api_key: str = ""
-    affiliate_partner_id: str = ""
+    affiliate_provider: str = ""  # "product_search" | "amazon"
+    affiliate_api_key: str = ""  # Amazon Access Key ID (for "amazon")
+    affiliate_api_secret: str = ""  # Amazon Secret Access Key (for "amazon")
+    affiliate_partner_id: str = ""  # Amazon Associates tag (e.g. "mytag-21")
     affiliate_api_base_url: str = ""
+    affiliate_marketplace: str = ""  # e.g. "www.amazon.sa" or "www.amazon.com"
     min_affiliate_match_score: int = 70
 
     # Google OAuth 2.0 (Blogger API v3)

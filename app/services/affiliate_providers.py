@@ -138,6 +138,14 @@ class AffiliateDiscoveryService:
         self._matcher = ProductMatchService()
         self._repo = AffiliateOfferRepository(session)
 
+    def _automatic_provider(self) -> AffiliateProvider:
+        """Pick the automatic provider based on AFFILIATE_PROVIDER."""
+        if settings.affiliate_provider.strip().lower() == "amazon":
+            from app.services.affiliate_amazon import AmazonAffiliateProvider
+
+            return AmazonAffiliateProvider()
+        return ProductSearchAffiliateProvider()
+
     async def resolve(
         self,
         *,
@@ -157,7 +165,7 @@ class AffiliateDiscoveryService:
         if cached.status == "found":
             return cached
 
-        automatic = await ProductSearchAffiliateProvider().discover(product, session=self.session, transport=transport)
+        automatic = await self._automatic_provider().discover(product, session=self.session, transport=transport)
         if automatic.status != "found":
             return automatic
 
