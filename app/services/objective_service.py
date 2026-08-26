@@ -6,6 +6,8 @@ persists its outcome back onto the objective. The workflow is passed in
 import cycles and remains testable with any engine.
 """
 
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 

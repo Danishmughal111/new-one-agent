@@ -6,6 +6,8 @@ This service:
 - enforces permissions via the acting agent's permission set
 """
 
+from __future__ import annotations
+
 from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
