@@ -1,0 +1,50 @@
+services:
+  api:
+    build: .
+    environment:
+      # Configuration is supplied at runtime via environment variables.
+      # Safe development defaults are used when .env values are absent.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ai_company}:${POSTGRES_PASSWORD:-ai_company_password}@postgres:5432/${POSTGRES_DB:-ai_company_os}
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-dev-insecure-secret-key-change-me}
+      APP_ENV: ${APP_ENV:-development}
+      PORT: ${PORT:-8000}
+    ports:
+      - "${PORT:-8000}:${PORT:-8000}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    # Apply database migrations before starting the application.
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port $${PORT}"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ai_company}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ai_company_password}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_company_os}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ai_company} -d ${POSTGRES_DB:-ai_company_os}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    # Redis is future infrastructure; Phase 1 does not depend on it.
+
+volumes:
+  postgres_data:
+  redis_data:
