@@ -5,26 +5,39 @@ environment (or a `.env` file), never hardcoded.
 """
 
 from functools import lru_cache
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def normalize_database_url(value: object) -> object:
-    """Use asyncpg for every PostgreSQL URL consumed by this application."""
+    """Normalize PostgreSQL URLs for SQLAlchemy's asyncpg dialect."""
     if not isinstance(value, str):
         return value
 
     url = value.strip()
     if url.startswith("postgres://"):
-        return "postgresql+asyncpg://" + url[len("postgres://"):]
-    if url.startswith("postgresql+asyncpg://"):
-        return url
-    if url.startswith("postgresql://"):
-        return "postgresql+asyncpg://" + url[len("postgresql://"):]
-    if url.startswith("postgresql+"):
-        return "postgresql+asyncpg://" + url.split("://", 1)[1]
-    return value
+        url = "postgresql+asyncpg://" + url[len("postgres://"):]
+    elif not url.startswith("postgresql+asyncpg://") and url.startswith("postgresql://"):
+        url = "postgresql+asyncpg://" + url[len("postgresql://"):]
+    elif url.startswith("postgresql+"):
+        url = "postgresql+asyncpg://" + url.split("://", 1)[1]
+    elif not url.startswith("postgresql+asyncpg://"):
+        return value
+
+    parts = urlsplit(url)
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    if any(key == "sslmode" for key, _ in query):
+        # libpq uses sslmode; asyncpg accepts the equivalent ssl argument.
+        has_ssl = any(key == "ssl" for key, _ in query)
+        query = [
+            ("ssl" if key == "sslmode" and not has_ssl else key, val)
+            for key, val in query
+            if key != "sslmode" or not has_ssl
+        ]
+        url = urlunsplit(parts._replace(query=urlencode(query)))
+    return url
 
 
 class Settings(BaseSettings):
