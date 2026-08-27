@@ -12,13 +12,13 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app.core.config import settings
+from app.core.config import normalize_database_url, settings
 from app.models import Base
 
 config = context.config
 
 # Inject the configured database URL (overrides alembic.ini placeholder).
-config.set_main_option("sqlalchemy.url", settings.database_url)
+config.set_main_option("sqlalchemy.url", normalize_database_url(settings.database_url))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

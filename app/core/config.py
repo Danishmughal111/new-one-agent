@@ -10,6 +10,23 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def normalize_database_url(value: object) -> object:
+    """Use asyncpg for every PostgreSQL URL consumed by this application."""
+    if not isinstance(value, str):
+        return value
+
+    url = value.strip()
+    if url.startswith("postgres://"):
+        return "postgresql+asyncpg://" + url[len("postgres://"):]
+    if url.startswith("postgresql+asyncpg://"):
+        return url
+    if url.startswith("postgresql://"):
+        return "postgresql+asyncpg://" + url[len("postgresql://"):]
+    if url.startswith("postgresql+"):
+        return "postgresql+asyncpg://" + url.split("://", 1)[1]
+    return value
+
+
 class Settings(BaseSettings):
     """Central application settings.
 
@@ -59,10 +76,11 @@ class Settings(BaseSettings):
     # Affiliate offer discovery (all optional; the app runs without them).
     # When unconfigured, automatic affiliate discovery gracefully returns
     # "not_found" and the article is still generated/published without a CTA.
-    affiliate_provider: str = ""  # "product_search" | "amazon"
-    affiliate_api_key: str = ""  # Amazon Access Key ID (for "amazon")
-    affiliate_api_secret: str = ""  # Amazon Secret Access Key (for "amazon")
-    affiliate_partner_id: str = ""  # Amazon Associates tag (e.g. "mytag-21")
+    affiliate_provider: str = ""  # "amazon" | "product_search" (legacy fallback)
+    affiliate_api_key: str = ""  # Amazon Creators API Credential ID (client_id)
+    affiliate_api_secret: str = ""  # Amazon Creators API Credential Secret (client_secret)
+    affiliate_api_version: str = ""  # Optional Amazon Creators API credential version (3.1 / 3.2 / 3.3)
+    affiliate_partner_id: str = ""  # Amazon Associates Partner Tag (tracking ID)
     affiliate_api_base_url: str = ""
     affiliate_marketplace: str = ""  # e.g. "www.amazon.sa" or "www.amazon.com"
     min_affiliate_match_score: int = 70
@@ -81,18 +99,8 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def _normalize_database_url(cls, value):
-        """Force PostgreSQL URLs onto the asyncpg driver (async SQLAlchemy).
-
-        Render/Neon supply ``postgres://`` or ``postgresql://`` URLs, but the
-        async engine needs ``postgresql+asyncpg://``. SQLite URLs pass through.
-        """
-        if isinstance(value, str):
-            url = value.strip()
-            if url.startswith("postgres://"):
-                return "postgresql+asyncpg://" + url[len("postgres://"):]
-            if url.startswith("postgresql://"):
-                return "postgresql+asyncpg://" + url[len("postgresql://"):]
-        return value
+        """Force PostgreSQL URLs onto the asyncpg driver (async SQLAlchemy)."""
+        return normalize_database_url(value)
 
 
 @lru_cache

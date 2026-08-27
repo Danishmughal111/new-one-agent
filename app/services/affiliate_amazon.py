@@ -1,177 +1,370 @@
-"""Amazon Product Advertising API 5.0 affiliate provider.
+"""Amazon Creators API affiliate provider.
 
-Finds a real Amazon offer for the selected product via ``SearchItems`` (AWS
-Signature V4 signed). Requires env credentials; never invents URLs (uses
-Amazon's returned ``DetailPageURL`` or the deterministic ``/dp/{ASIN}?tag=``
-form with YOUR real Associates tag).
+This is the official Amazon affiliate integration for TrendEra. It is designed
+for the Amazon Creators API, which is the successor to PA-API 5. The provider
+uses the OAuth 2.0 client_credentials flow to obtain a bearer token, then calls
+Creators API SearchItems and only returns a link when Amazon returned a real
+detailPageURL that passes the existing strict product matcher.
 
-    AFFILIATE_PROVIDER=amazon
-    AFFILIATE_API_KEY      (Access Key ID)
-    AFFILIATE_API_SECRET   (Secret Access Key)
-    AFFILIATE_PARTNER_ID   (Associates tag, e.g. "mytag-21")
-    AFFILIATE_MARKETPLACE  (e.g. "www.amazon.sa" or "www.amazon.com")
+Required Amazon env vars:
+    AFFILIATE_API_KEY       -> Creators API Credential ID (client_id)
+    AFFILIATE_API_SECRET    -> Creators API Credential Secret (client_secret)
+    AFFILIATE_PARTNER_ID    -> Amazon Associates Partner Tag
+    AFFILIATE_MARKETPLACE   -> Amazon marketplace domain, e.g. www.amazon.com
+
+Optional:
+    AFFILIATE_API_VERSION   -> Creators API credential version (3.1 / 3.2 / 3.3)
 """
 
-import hashlib
-import hmac
-import json
-from datetime import datetime, timezone
+from __future__ import annotations
+
+from dataclasses import dataclass
+from time import monotonic
+from typing import Any
 
 import httpx
 
 from app.core.config import settings
+from app.services.affiliate_matching import ProductMatchService
 from app.services.affiliate_providers import AffiliateOffer, AffiliateProvider
+from app.services.affiliate_service import is_valid_affiliate_url
 
-SERVICE = "ProductAdvertisingAPI"
-TARGET = "com.amazon.paapi5.v1.ProductAdvertisingAPIv1.SearchItems"
+CREATORS_API_BASE_URL = "https://creatorsapi.amazon"
+CREATORS_API_SCOPE = "creatorsapi::default"
+CREATORS_SEARCH_PATH = "/catalog/v1/searchItems"
 
-# marketplace -> (API host, signing region)
-_MARKETPLACES = {
-    "www.amazon.com": ("webservices.amazon.com", "us-east-1"),
-    "amazon.com": ("webservices.amazon.com", "us-east-1"),
-    "www.amazon.sa": ("webservices.amazon.sa", "eu-west-1"),
-    "amazon.sa": ("webservices.amazon.sa", "eu-west-1"),
-    "www.amazon.ae": ("webservices.amazon.ae", "eu-west-1"),
-    "amazon.ae": ("webservices.amazon.ae", "eu-west-1"),
-    "www.amazon.co.uk": ("webservices.amazon.co.uk", "eu-west-1"),
+_TOKEN_ENDPOINTS = {
+    "NA": "https://api.amazon.com/auth/o2/token",
+    "EU": "https://api.amazon.co.uk/auth/o2/token",
+    "FE": "https://api.amazon.co.jp/auth/o2/token",
+}
+
+_VERSION_TO_REGION = {
+    "3.1": "NA",
+    "3.2": "EU",
+    "3.3": "FE",
 }
 
 
+def _alias_marketplaces(*marketplaces: str) -> set[str]:
+    aliases: set[str] = set()
+    for marketplace in marketplaces:
+        normalized = marketplace.strip().lower()
+        aliases.add(normalized)
+        if normalized.startswith("www."):
+            aliases.add(normalized[4:])
+    return aliases
+
+
+_MARKETPLACES_BY_REGION = {
+    "NA": _alias_marketplaces(
+        "www.amazon.com",
+        "www.amazon.ca",
+        "www.amazon.com.mx",
+        "www.amazon.com.br",
+    ),
+    "EU": _alias_marketplaces(
+        "www.amazon.co.uk",
+        "www.amazon.de",
+        "www.amazon.fr",
+        "www.amazon.it",
+        "www.amazon.es",
+        "www.amazon.nl",
+        "www.amazon.com.be",
+        "www.amazon.eg",
+        "www.amazon.in",
+        "www.amazon.ie",
+        "www.amazon.pl",
+        "www.amazon.sa",
+        "www.amazon.se",
+        "www.amazon.com.tr",
+        "www.amazon.ae",
+    ),
+    "FE": _alias_marketplaces(
+        "www.amazon.co.jp",
+        "www.amazon.sg",
+        "www.amazon.com.au",
+    ),
+}
+
+_MARKETPLACE_TO_REGION = {
+    marketplace: region
+    for region, marketplaces in _MARKETPLACES_BY_REGION.items()
+    for marketplace in marketplaces
+}
+
+_TOKEN_CACHE: dict[tuple[str, str, str], "_TokenCacheEntry"] = {}
+
+
+@dataclass(slots=True)
+class _TokenCacheEntry:
+    access_token: str
+    expires_at: float
+
+
+def _clean(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _normalize_marketplace(marketplace: str) -> str:
+    value = _clean(marketplace).lower()
+    if "://" in value:
+        value = value.split("://", 1)[1]
+    if "/" in value:
+        value = value.split("/", 1)[0]
+    return value
+
+
 def marketplace_config(marketplace: str) -> tuple[str, str] | None:
-    """Return (api_host, region) for a marketplace, or None if unsupported."""
-    return _MARKETPLACES.get((marketplace or "").strip().lower())
+    """Return ``(token_endpoint, region)`` for a supported marketplace."""
+    normalized = _normalize_marketplace(marketplace)
+    region = _MARKETPLACE_TO_REGION.get(normalized)
+    if not region:
+        return None
+    return _TOKEN_ENDPOINTS[region], region
 
 
-def build_affiliate_url(host: str, asin: str, tag: str) -> str:
-    """Deterministic affiliate URL using the caller's real Associates tag."""
-    return f"https://{host}/dp/{asin}?tag={tag}"
+def _token_endpoint_for_settings(marketplace: str) -> tuple[str, str] | None:
+    version = _clean(settings.affiliate_api_version).lstrip("vV")
+    if version:
+        region = _VERSION_TO_REGION.get(version)
+        if not region:
+            return None
+        return _TOKEN_ENDPOINTS[region], region
+    return marketplace_config(marketplace)
 
 
-def _sign(key: bytes, msg: str) -> bytes:
-    return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+def _get_value(data: Any, *names: str) -> Any:
+    if not isinstance(data, dict):
+        return None
+
+    for name in names:
+        if name in data:
+            return data[name]
+
+    lowered = {str(key).lower(): value for key, value in data.items()}
+    for name in names:
+        key = name.lower()
+        if key in lowered:
+            return lowered[key]
+    return None
 
 
-def _signing_key(secret_key: str, date_stamp: str, region: str) -> bytes:
-    k_date = _sign(("AWS4" + secret_key).encode("utf-8"), date_stamp)
-    k_region = _sign(k_date, region)
-    k_service = _sign(k_region, SERVICE)
-    return _sign(k_service, "aws4_request")
+def _extract_item_info(item: dict) -> tuple[str | None, str | None, str | None]:
+    item_info = _get_value(item, "itemInfo", "ItemInfo") or {}
+    title_info = _get_value(item_info, "title", "Title") or {}
+    brand_info = _get_value(item_info, "byLineInfo", "ByLineInfo") or {}
+    brand = _get_value(brand_info, "brand", "Brand") or {}
+
+    title = _get_value(title_info, "displayValue", "DisplayValue")
+    brand_value = _get_value(brand, "displayValue", "DisplayValue")
+    url = _get_value(item, "detailPageURL", "DetailPageURL")
+    return title, brand_value, url
 
 
-def sign_search_request(
-    *, host: str, region: str, access_key: str, secret_key: str, payload: str
-) -> dict:
-    """Return AWS Signature V4 signed headers for a PA-API 5.0 SearchItems POST."""
-    now = datetime.now(timezone.utc)
-    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
-    date_stamp = now.strftime("%Y%m%d")
+async def _fetch_access_token(
+    *,
+    token_endpoint: str,
+    client_id: str,
+    client_secret: str,
+    transport=None,
+) -> str:
+    """Fetch and cache an OAuth token for the configured Creators API app."""
+    cache_key = (token_endpoint, client_id, client_secret)
+    cached = _TOKEN_CACHE.get(cache_key)
+    now = monotonic()
+    if cached and cached.expires_at > now:
+        return cached.access_token
 
-    canonical_headers = (
-        f"content-type:application/json; charset=UTF-8\n"
-        f"host:{host}\n"
-        f"x-amz-date:{amz_date}\n"
-        f"x-amz-target:{TARGET}\n"
-    )
-    signed_headers = "content-type;host;x-amz-date;x-amz-target"
-    payload_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-    canonical_request = "\n".join(
-        ["POST", "/paapi5/searchitems", "", canonical_headers, signed_headers, payload_hash]
-    )
-    credential_scope = f"{date_stamp}/{region}/{SERVICE}/aws4_request"
-    string_to_sign = "\n".join(
-        [
-            "AWS4-HMAC-SHA256",
-            amz_date,
-            credential_scope,
-            hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
-        ]
-    )
-    key = _signing_key(secret_key, date_stamp, region)
-    signature = hmac.new(key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
-    authorization = (
-        f"AWS4-HMAC-SHA256 Credential={access_key}/{credential_scope}, "
-        f"SignedHeaders={signed_headers}, Signature={signature}"
-    )
-    return {
-        "content-type": "application/json; charset=UTF-8",
-        "host": host,
-        "x-amz-date": amz_date,
-        "x-amz-target": TARGET,
-        "authorization": authorization,
+    payload = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "scope": CREATORS_API_SCOPE,
     }
+
+    async with httpx.AsyncClient(transport=transport, timeout=30) as client:
+        response = await client.post(
+            token_endpoint,
+            headers={"Content-Type": "application/json"},
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+    token = _clean(data.get("access_token"))
+    expires_in = int(data.get("expires_in") or 0)
+    if not token or expires_in <= 0:
+        raise ValueError("Creators API token response missing access_token or expires_in")
+
+    _TOKEN_CACHE[cache_key] = _TokenCacheEntry(
+        access_token=token,
+        expires_at=now + max(0, expires_in - 60),
+    )
+    return token
+
+
+async def _search_items(
+    *,
+    access_token: str,
+    marketplace: str,
+    partner_tag: str,
+    keywords: str,
+    brand: str | None = None,
+    transport=None,
+) -> list[dict]:
+    """Search Amazon for matching items using the official Creators API."""
+    payload: dict[str, Any] = {
+        "keywords": keywords,
+        "itemCount": 10,
+        "marketplace": marketplace,
+        "partnerTag": partner_tag,
+        "resources": ["itemInfo.title", "itemInfo.byLineInfo"],
+    }
+    if brand:
+        payload["brand"] = brand
+
+    async with httpx.AsyncClient(transport=transport, timeout=30) as client:
+        response = await client.post(
+            f"{CREATORS_API_BASE_URL}{CREATORS_SEARCH_PATH}",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+                "x-marketplace": marketplace,
+            },
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+    search_result = _get_value(data, "searchResult", "SearchResult") or {}
+    items = _get_value(search_result, "items", "Items") or []
+    return items if isinstance(items, list) else []
 
 
 class AmazonAffiliateProvider(AffiliateProvider):
-    """Searches Amazon PA-API 5.0 and returns the matching product offer."""
+    """Search Amazon Creators API and return the strictest matching offer."""
 
     name = "amazon"
 
-    async def discover(self, product, session=None, transport=None) -> AffiliateOffer:
-        access_key = settings.affiliate_api_key.strip()
-        secret_key = settings.affiliate_api_secret.strip()
-        tag = settings.affiliate_partner_id.strip()
-        marketplace = settings.affiliate_marketplace.strip()
+    def __init__(self) -> None:
+        self._matcher = ProductMatchService()
 
-        if not (access_key and secret_key and tag and marketplace):
+    async def discover(self, product, session=None, transport=None) -> AffiliateOffer:
+        client_id = _clean(settings.affiliate_api_key)
+        client_secret = _clean(settings.affiliate_api_secret)
+        partner_tag = _clean(settings.affiliate_partner_id)
+        marketplace = _clean(settings.affiliate_marketplace)
+
+        if not (client_id and client_secret and partner_tag and marketplace):
             return AffiliateOffer(
                 status="not_found",
                 source="amazon",
-                reason="Amazon PA-API not configured (AFFILIATE_API_KEY/SECRET/PARTNER_ID/MARKETPLACE)",
+                reason="Amazon Creators API not configured (AFFILIATE_API_KEY/SECRET/PARTNER_ID/MARKETPLACE)",
             )
 
-        cfg = marketplace_config(marketplace)
-        if not cfg:
+        marketplace_details = marketplace_config(marketplace)
+        if not marketplace_details:
             return AffiliateOffer(
-                status="not_found", source="amazon", reason=f"unsupported marketplace: {marketplace}"
+                status="not_found",
+                source="amazon",
+                reason=f"unsupported Amazon marketplace: {marketplace}",
             )
-        host, region = cfg
 
-        full_marketplace = marketplace if marketplace.startswith("www.") else f"www.{marketplace}"
-        body = {
-            "Keywords": product.get("name", ""),
-            "ItemCount": 5,
-            "SearchIndex": "All",
-            "Resources": ["ItemInfo.Title", "ItemInfo.ByLineInfo"],
-            "PartnerTag": tag,
-            "PartnerType": "Associates",
-            "Marketplace": full_marketplace,
-        }
-        payload = json.dumps(body)
-        headers = sign_search_request(
-            host=host, region=region, access_key=access_key, secret_key=secret_key, payload=payload
-        )
-        url = f"https://{host}/paapi5/searchitems"
+        token_endpoint, _ = _token_endpoint_for_settings(marketplace) or (None, None)
+        if not token_endpoint:
+            return AffiliateOffer(
+                status="not_found",
+                source="amazon",
+                reason="unsupported Amazon Creators API credential version",
+            )
+
+        keywords = _clean(product.get("name")) or _clean(product.get("title"))
+        if not keywords:
+            return AffiliateOffer(
+                status="not_found",
+                source="amazon",
+                reason="missing product name for Amazon search",
+            )
 
         try:
-            async with httpx.AsyncClient(transport=transport, timeout=30) as client:
-                response = await client.post(url, headers=headers, content=payload)
-                response.raise_for_status()
-                data = response.json()
+            access_token = await _fetch_access_token(
+                token_endpoint=token_endpoint,
+                client_id=client_id,
+                client_secret=client_secret,
+                transport=transport,
+            )
+            items = await _search_items(
+                access_token=access_token,
+                marketplace=marketplace,
+                partner_tag=partner_tag,
+                keywords=keywords,
+                brand=_clean(product.get("brand")) or None,
+                transport=transport,
+            )
         except Exception as exc:  # noqa: BLE001 - provider failures are non-fatal
-            return AffiliateOffer(status="failed", source="amazon", reason=f"Amazon search failed: {exc}")
+            return AffiliateOffer(
+                status="failed",
+                source="amazon",
+                reason=f"Amazon Creators API request failed: {exc}",
+            )
 
-        items = ((data.get("SearchResult") or {}).get("Items")) or []
         if not items:
-            return AffiliateOffer(status="not_found", source="amazon", reason="no Amazon results")
+            return AffiliateOffer(status="not_found", source="amazon", reason="no Amazon results returned")
 
-        first = items[0]
-        asin = first.get("ASIN")
-        item_info = first.get("ItemInfo") or {}
-        title = (item_info.get("Title") or {}).get("DisplayValue")
-        brand = (item_info.get("ByLineInfo") or {}).get("Brand", {}).get("DisplayValue")
-        offer_url = first.get("DetailPageURL") or (build_affiliate_url(host, asin, tag) if asin else None)
+        selected = {
+            "name": _clean(product.get("name")),
+            "brand": _clean(product.get("brand")),
+        }
 
-        if not offer_url:
-            return AffiliateOffer(status="not_found", source="amazon", reason="Amazon item missing URL/ASIN")
+        best_offer: AffiliateOffer | None = None
+        best_score = -1
 
-        return AffiliateOffer(
-            status="found",
-            url=offer_url,
-            product_name=title,
-            brand=brand,
-            source="amazon",
-            match_score=0,
-            reason="Amazon candidate offer",
-        )
+        for item in items:
+            title, brand, url = _extract_item_info(item)
+            if not is_valid_affiliate_url(url):
+                continue
 
+            match = self._matcher.match(
+                selected,
+                {"name": title or "", "brand": brand or ""},
+            )
+            score = int(match["match_score"])
+            candidate = AffiliateOffer(
+                status="found",
+                url=url,
+                product_name=title,
+                brand=brand,
+                source="amazon",
+                match_score=score,
+                reason="Amazon Creators API SearchItems candidate",
+            )
+            if score > best_score:
+                best_offer = candidate
+                best_score = score
+            if score == 100:
+                break
+
+        if best_offer is None:
+            return AffiliateOffer(
+                status="not_found",
+                source="amazon",
+                reason="Amazon results did not include a valid affiliate URL",
+            )
+
+        if best_score < settings.min_affiliate_match_score:
+            return AffiliateOffer(
+                status="not_found",
+                url=None,
+                product_name=best_offer.product_name,
+                brand=best_offer.brand,
+                source="amazon",
+                match_score=best_score,
+                reason=(
+                    "no Amazon result met the strict match threshold "
+                    f"({best_score} < {settings.min_affiliate_match_score})"
+                ),
+            )
+
+        best_offer.reason = "Amazon Creators API SearchItems strict match"
+        return best_offer

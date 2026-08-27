@@ -3,7 +3,8 @@
 Providers are consulted in priority order:
     1. ManualAffiliateProvider  (explicitly configured affiliate_url)
     2. CachedAffiliateProvider  (previously verified offer in the DB)
-    3. ProductSearchAffiliateProvider (automatic search via a configured API)
+    3. AmazonAffiliateProvider  (Amazon Creators API, default automatic path)
+    4. ProductSearchAffiliateProvider  (legacy opt-in fallback)
 
 Every provider returns a structured ``AffiliateOffer`` and never invents URLs.
 """
@@ -139,12 +140,18 @@ class AffiliateDiscoveryService:
         self._repo = AffiliateOfferRepository(session)
 
     def _automatic_provider(self) -> AffiliateProvider:
-        """Pick the automatic provider based on AFFILIATE_PROVIDER."""
-        if settings.affiliate_provider.strip().lower() == "amazon":
-            from app.services.affiliate_amazon import AmazonAffiliateProvider
+        """Pick the automatic provider based on AFFILIATE_PROVIDER.
 
-            return AmazonAffiliateProvider()
-        return ProductSearchAffiliateProvider()
+        Amazon Creators API is the default automatic provider. The legacy
+        generic search provider remains opt-in so existing configurations can
+        still force the older integration if needed.
+        """
+        if settings.affiliate_provider.strip().lower() == "product_search":
+            return ProductSearchAffiliateProvider()
+
+        from app.services.affiliate_amazon import AmazonAffiliateProvider
+
+        return AmazonAffiliateProvider()
 
     async def resolve(
         self,
@@ -176,10 +183,12 @@ class AffiliateDiscoveryService:
         if match["match_score"] < settings.min_affiliate_match_score:
             return AffiliateOffer(
                 status="not_found",
-                source="product_search",
+                source=automatic.source or "amazon",
+                product_name=automatic.product_name,
+                brand=automatic.brand,
                 match_score=match["match_score"],
                 reason=(
-                    f"offer below match threshold "
+                    f"{automatic.source or 'amazon'} offer below match threshold "
                     f"({match['match_score']} < {settings.min_affiliate_match_score})"
                 ),
             )
@@ -190,7 +199,7 @@ class AffiliateDiscoveryService:
 
     async def _cache(self, product_id: str, offer: AffiliateOffer) -> None:
         """Persist a verified offer so it can be reused later."""
-        if not product_id or not offer.url:
+        if not product_id or not is_valid_affiliate_url(offer.url):
             return
         record = AffiliateOfferRecord(
             product_id=product_id,
@@ -202,4 +211,3 @@ class AffiliateDiscoveryService:
             verified_at=utcnow(),
         )
         await self._repo.save(record)  # flushes; caller commits
-

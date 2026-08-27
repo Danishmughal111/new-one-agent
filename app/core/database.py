@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool, StaticPool
 
-from app.core.config import settings
+from app.core.config import normalize_database_url, settings
 from app.models.base import Base
 
 _engine_kwargs: dict = {}
@@ -29,8 +29,9 @@ if settings.database_url.startswith("sqlite"):
         # File-backed SQLite does not need pooling.
         _engine_kwargs["poolclass"] = NullPool
 
+_database_url = normalize_database_url(settings.database_url)
 engine = create_async_engine(
-    settings.database_url,
+    _database_url,
     echo=settings.debug,
     future=True,
     **_engine_kwargs,

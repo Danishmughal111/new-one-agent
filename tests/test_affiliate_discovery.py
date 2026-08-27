@@ -125,7 +125,7 @@ async def test_no_provider_configured(session, monkeypatch):
     monkeypatch.setattr(settings, "affiliate_api_base_url", "")
     offer = await AffiliateDiscoveryService(session).resolve(product_id="p1", identity=SONY_XM5)
     assert offer.status == "not_found"
-    assert offer.source == "product_search"
+    assert offer.source == "amazon"
 
 
 async def test_provider_failure_returns_failed(session, monkeypatch):
@@ -253,5 +253,4 @@ async def test_workflow_blogger_publishes_without_affiliate(session, monkeypatch
     assert result["published"] is True
     assert result["affiliate_status"] == "not_found"
     assert result["affiliate_cta_inserted"] is False
-
 
